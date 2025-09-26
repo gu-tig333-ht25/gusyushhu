@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(
@@ -26,24 +28,31 @@ class TodoApp extends StatelessWidget {
 enum FilterOption { all, done, undone }
 
 class Todo {
+  String id;
   String title;
   bool done;
-  Todo(this.title, {this.done = false});
+
+  Todo(this.title, {this.done = false, this.id = ""});
+
+  factory Todo.fromJson(Map<String, dynamic> json) {
+    return Todo(
+      json['title'],
+      done: json['done'],
+      id: json['id'] ?? "",
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {"title": title, "done": done};
+  }
 }
 
 // Provider
 class TodoProvider extends ChangeNotifier {
-  final List<Todo> _todos = [
-    Todo("Write a book"),
-    Todo("Do homework"),
-    Todo("Tidy room", done: true),
-    Todo("Watch TV"),
-    Todo("Nap"),
-    Todo("Shop groceries"),
-    Todo("Have fun"),
-    Todo("Meditate"),
-  ];
+  final String apiKey = "7865019f-5b97-4ce6-86ba-e896b6aa8709";
+  final String baseUrl = "https://todoapp-api.apps.k8s.gu.se/todos";
 
+  List<Todo> _todos = [];
   FilterOption _filter = FilterOption.all;
 
   List<Todo> get todos {
@@ -59,21 +68,52 @@ class TodoProvider extends ChangeNotifier {
 
   FilterOption get filter => _filter;
 
-  void addTodo(String title) {
-    _todos.add(Todo(title));
-    notifyListeners();
+  Future<void> fetchTodos() async {
+    final url = Uri.parse("$baseUrl?key=$apiKey");
+    final response = await http.get(url);
+    if (response.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(response.body);
+      _todos = data.map((json) => Todo.fromJson(json)).toList();
+      notifyListeners();
+    } else {
+      throw Exception("Failed to load todos");
+    }
   }
 
-  void toggleDone(int index) {
-    final todo = todos[index];
-    todo.done = !todo.done;
-    notifyListeners();
+  Future<void> addTodo(String title) async {
+    final url = Uri.parse("$baseUrl?key=$apiKey");
+    final response = await http.post(url,
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"title": title, "done": false}));
+    if (response.statusCode == 200) {
+      await fetchTodos();
+    } else {
+      throw Exception("Failed to add todo");
+    }
   }
 
-  void removeTodo(int index) {
+  Future<void> toggleDone(int index) async {
     final todo = todos[index];
-    _todos.remove(todo);
-    notifyListeners();
+    final url = Uri.parse("$baseUrl/${todo.id}?key=$apiKey");
+    final response = await http.put(url,
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"title": todo.title, "done": !todo.done}));
+    if (response.statusCode == 200) {
+      await fetchTodos();
+    } else {
+      throw Exception("Failed to update todo");
+    }
+  }
+
+  Future<void> removeTodo(int index) async {
+    final todo = todos[index];
+    final url = Uri.parse("$baseUrl/${todo.id}?key=$apiKey");
+    final response = await http.delete(url);
+    if (response.statusCode == 200) {
+      await fetchTodos();
+    } else {
+      throw Exception("Failed to delete todo");
+    }
   }
 
   void changeFilter(FilterOption option) {
@@ -83,8 +123,20 @@ class TodoProvider extends ChangeNotifier {
 }
 
 // Main skärm
-class TodoListPage extends StatelessWidget {
+class TodoListPage extends StatefulWidget {
   const TodoListPage({super.key});
+
+  @override
+  State<TodoListPage> createState() => _TodoListPageState();
+}
+
+class _TodoListPageState extends State<TodoListPage> {
+  @override
+  void initState() {
+    super.initState();
+    final provider = context.read<TodoProvider>();
+    provider.fetchTodos();
+  }
 
   @override
   Widget build(BuildContext context) {
