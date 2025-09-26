@@ -1,37 +1,95 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 void main() {
-  runApp(const TodoApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => TodoProvider(),
+      child: const TodoApp(),
+    ),
+  );
 }
 
 class TodoApp extends StatelessWidget {
   const TodoApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'TIG333 TODO',
-      theme: ThemeData(primarySwatch: Colors.blueGrey),
       home: const TodoListPage(),
     );
   }
 }
 
+enum FilterOption { all, done, undone }
+
+class Todo {
+  String title;
+  bool done;
+  Todo(this.title, {this.done = false});
+}
+
+// Provider
+class TodoProvider extends ChangeNotifier {
+  final List<Todo> _todos = [
+    Todo("Write a book"),
+    Todo("Do homework"),
+    Todo("Tidy room", done: true),
+    Todo("Watch TV"),
+    Todo("Nap"),
+    Todo("Shop groceries"),
+    Todo("Have fun"),
+    Todo("Meditate"),
+  ];
+
+  FilterOption _filter = FilterOption.all;
+
+  List<Todo> get todos {
+    switch (_filter) {
+      case FilterOption.done:
+        return _todos.where((t) => t.done).toList();
+      case FilterOption.undone:
+        return _todos.where((t) => !t.done).toList();
+      case FilterOption.all:
+        return _todos;
+    }
+  }
+
+  FilterOption get filter => _filter;
+
+  void addTodo(String title) {
+    _todos.add(Todo(title));
+    notifyListeners();
+  }
+
+  void toggleDone(int index) {
+    final todo = todos[index];
+    todo.done = !todo.done;
+    notifyListeners();
+  }
+
+  void removeTodo(int index) {
+    final todo = todos[index];
+    _todos.remove(todo);
+    notifyListeners();
+  }
+
+  void changeFilter(FilterOption option) {
+    _filter = option;
+    notifyListeners();
+  }
+}
+
+// Main skärm
 class TodoListPage extends StatelessWidget {
   const TodoListPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final todos = [
-      {"title": "Write a book", "done": false},
-      {"title": "Do homework", "done": false},
-      {"title": "Tidy room", "done": true},
-      {"title": "Watch TV", "done": false},
-      {"title": "Nap", "done": false},
-      {"title": "Shop groceries", "done": false},
-      {"title": "Have fun", "done": false},
-      {"title": "Meditate", "done": false},
-    ];
+    final provider = context.watch<TodoProvider>();
+    final todos = provider.todos;
 
     return Scaffold(
       appBar: PreferredSize(
@@ -43,40 +101,63 @@ class TodoListPage extends StatelessWidget {
               centerTitle: true,
               title: const Text("TIG333 TODO"),
               actions: [
-                IconButton(
-                  onPressed: () {},
-                  icon: Icon(Icons.more_vert),
-                  splashRadius: 24,
+                PopupMenuButton<FilterOption>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: provider.changeFilter,
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: FilterOption.all,
+                      child: Text('All'),
+                    ),
+                    PopupMenuItem(
+                      value: FilterOption.done,
+                      child: Text('Done'),
+                    ),
+                    PopupMenuItem(
+                      value: FilterOption.undone,
+                      child: Text('Undone'),
+                    ),
+                  ],
                 ),
               ],
             ),
           ],
         ),
       ),
-      body: ListView.builder(
-        itemCount: todos.length,
-        itemBuilder: (context, index) {
-          final todo = todos[index];
-          return ListTile(
-            leading: Checkbox(value: todo["done"] as bool, onChanged: (_) {}),
-            title: Text(
-              todo["title"] as String,
-              style: TextStyle(
-                decoration: (todo["done"] as bool)
-                    ? TextDecoration.lineThrough
-                    : TextDecoration.none,
-              ),
+      body: todos.isEmpty
+          ? const Center(child: Text("No Todos"))
+          : ListView.builder(
+              itemCount: todos.length,
+              itemBuilder: (context, index) {
+                final todo = todos[index];
+                return ListTile(
+                  leading: Checkbox(
+                    value: todo.done,
+                    onChanged: (_) => provider.toggleDone(index),
+                  ),
+                  title: Text(
+                    todo.title,
+                    style: TextStyle(
+                      decoration:
+                          todo.done ? TextDecoration.lineThrough : TextDecoration.none,
+                    ),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => provider.removeTodo(index),
+                  ),
+                );
+              },
             ),
-            trailing: const Icon(Icons.close),
-          );
-        },
-      ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
+        onPressed: () async {
+          final newTodo = await Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const AddTodoPage()),
           );
+          if (newTodo != null && newTodo is String && newTodo.trim().isNotEmpty) {
+            provider.addTodo(newTodo);
+          }
         },
         child: const Icon(Icons.add),
       ),
@@ -84,12 +165,33 @@ class TodoListPage extends StatelessWidget {
   }
 }
 
-class AddTodoPage extends StatelessWidget {
+// Add sida
+class AddTodoPage extends StatefulWidget {
   const AddTodoPage({super.key});
 
   @override
+  State<AddTodoPage> createState() => _AddTodoPageState();
+}
+
+class _AddTodoPageState extends State<AddTodoPage> {
+  final TextEditingController _controller = TextEditingController();
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isNotEmpty) {
+      Navigator.pop(context, text);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-  return Scaffold(
+    return Scaffold(
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(80),
         child: Column(
@@ -111,13 +213,18 @@ class AddTodoPage extends StatelessWidget {
         child: Column(
           children: [
             TextField(
+              controller: _controller,
               decoration: const InputDecoration(
                 hintText: "What are you going to do?",
                 border: OutlineInputBorder(),
               ),
+              onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 20),
-            ElevatedButton(onPressed: () {}, child: const Text("+ ADD")),
+            ElevatedButton(
+              onPressed: _submit,
+              child: const Text("+ ADD"),
+            ),
           ],
         ),
       ),
